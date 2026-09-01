@@ -1,3 +1,5 @@
+<div dir="rtl" align="right">
+
 # StoryEco | Kitsu Local Backup
 
 ابزار دسکتاپ ویندوز برای تهیه نسخه‌های محلی و قابل‌انتقال از سرور **Kitsu/Zou** و فضای ذخیره‌سازی **S3**.
@@ -307,3 +309,5 @@ licenses/                  مجوز وابستگی‌های همراه
 کد این پروژه تحت مجوز MIT منتشر می‌شود. جزئیات اجزای ثالث در [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) و پوشه [licenses](licenses/) آمده است.
 
 تهیه‌شده توسط [StoryEco.com](https://storyeco.com)
+
+</div>
