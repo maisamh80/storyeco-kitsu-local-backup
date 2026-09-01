@@ -1,0 +1,143 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+MODE="${1:-}"
+case "$MODE" in
+    snapshot|backup|self-test) ;;
+    *)
+        echo "usage: storyeco-backup-export {snapshot|backup|self-test}" >&2
+        exit 64
+        ;;
+esac
+
+if [[ "$MODE" == "self-test" ]]; then
+    for required in tar docker hostnamectl dpkg-query; do
+        command -v "$required" >/dev/null || {
+            echo "missing required command: $required" >&2
+            exit 69
+        }
+    done
+    docker compose --env-file /opt/kitsu/.env \
+        -f /opt/kitsu/docker-compose.yml ps --status running >/dev/null
+    echo "storyeco-backup-export: ready"
+    exit 0
+fi
+
+umask 077
+WORK_DIR="$(mktemp -d /var/tmp/storyeco-backup.XXXXXXXX)"
+trap 'rm -rf -- "$WORK_DIR"' EXIT HUP INT TERM
+
+GENERATED="$WORK_DIR/__generated__"
+mkdir -p "$GENERATED/database" "$GENERATED/inventory"
+
+docker compose --env-file /opt/kitsu/.env \
+    -f /opt/kitsu/docker-compose.yml \
+    exec -T postgres pg_dump -U zou -d zoudb -Fc \
+    > "$GENERATED/database/zoudb.dump"
+
+docker compose --env-file /opt/kitsu/.env \
+    -f /opt/kitsu/docker-compose.yml \
+    exec -T postgres pg_isready -U zou -d zoudb \
+    > "$GENERATED/database/pg-isready.txt"
+
+date --iso-8601=seconds > "$GENERATED/inventory/created-at.txt"
+hostnamectl > "$GENERATED/inventory/hostnamectl.txt"
+uname -a > "$GENERATED/inventory/uname.txt"
+docker version > "$GENERATED/inventory/docker-version.txt"
+docker compose version > "$GENERATED/inventory/docker-compose-version.txt"
+docker image ls --digests --no-trunc > "$GENERATED/inventory/docker-images.txt"
+docker volume ls > "$GENERATED/inventory/docker-volumes.txt"
+getent passwd > "$GENERATED/inventory/passwd.txt"
+getent group > "$GENERATED/inventory/group.txt"
+getent passwd | awk -F: '$3 >= 1000 && $3 < 65534 {print}' \
+    > "$GENERATED/inventory/local-users.txt"
+systemctl list-unit-files --no-pager > "$GENERATED/inventory/systemd-unit-files.txt"
+systemctl --no-pager --full status \
+    kitsu-infra.service zou.service zou-events.service nginx.service \
+    > "$GENERATED/inventory/kitsu-services.txt" 2>&1 || true
+ufw status verbose > "$GENERATED/inventory/ufw-status.txt" 2>&1 || true
+ss -lntup > "$GENERATED/inventory/listening-ports.txt" 2>&1 || true
+lsblk -f > "$GENERATED/inventory/block-devices.txt" 2>&1 || true
+findmnt > "$GENERATED/inventory/mounts.txt" 2>&1 || true
+free -h > "$GENERATED/inventory/memory.txt" 2>&1 || true
+df -hT > "$GENERATED/inventory/disk-usage.txt" 2>&1 || true
+
+cat > "$GENERATED/RESTORE-NOTES.txt" <<'EOF'
+This is a portable StoryEco/Kitsu recovery bundle, not a hypervisor disk image.
+
+Core restore order:
+1. Provision a clean Ubuntu 24.04 server.
+2. Install Docker Engine, PostgreSQL/Redis containers, Python 3.12, Nginx and FFmpeg.
+3. Restore files from rootfs/ while preserving owners and permissions.
+4. Start PostgreSQL and restore generated/database/zoudb.dump with pg_restore.
+5. Update DOMAIN_NAME and Nginx for the new IP/domain and issue a new TLS certificate.
+6. Restore S3 objects from the matching local S3 snapshot before enabling uploads.
+7. Start zou, zou-events and Nginx, then verify /api and log in.
+
+Intentionally excluded because they must be regenerated on a new provider:
+- SSH host private keys
+- /etc/machine-id
+- Let's Encrypt private keys and IP-specific certificates
+- Redis cache data
+EOF
+
+ROOT_PATHS=(
+    etc/zou
+    etc/nginx/nginx.conf
+    etc/nginx/sites-available/kitsu
+    etc/nginx/sites-enabled/kitsu
+    etc/systemd/system/kitsu-infra.service
+    etc/systemd/system/zou.service
+    etc/systemd/system/zou-events.service
+    etc/sysctl.d/99-kitsu.conf
+    etc/ssh/sshd_config
+    etc/ssh/sshd_config.d/00-hardening.conf
+    etc/ufw
+    etc/sudoers
+    etc/sudoers.d
+    opt/kitsu/.env
+    opt/kitsu/docker-compose.yml
+    opt/kitsu/web/current
+    opt/zou/previews
+    opt/zou/plugins
+)
+
+# Preserve public login keys for every regular local user, never private keys.
+while IFS=: read -r _ _ uid _ _ home _; do
+    if (( uid >= 1000 && uid < 65534 )) && [[ -f "$home/.ssh/authorized_keys" ]]; then
+        ROOT_PATHS+=("${home#/}/.ssh/authorized_keys")
+    fi
+done < /etc/passwd
+
+if [[ "$MODE" == "snapshot" ]]; then
+    dpkg-query -W -f='${binary:Package}\t${Version}\n' \
+        > "$GENERATED/inventory/packages.tsv"
+    apt-mark showmanual > "$GENERATED/inventory/manual-packages.txt"
+    cp -a /etc/apt "$WORK_DIR/etc-apt" 2>/dev/null || true
+    ROOT_PATHS+=(
+        etc/apt
+        etc/hosts
+        etc/hostname
+        etc/fstab
+        etc/docker
+        etc/default
+        etc/environment
+        etc/timezone
+    )
+fi
+
+EXISTING_PATHS=()
+for path in "${ROOT_PATHS[@]}"; do
+    [[ -e "/$path" || -L "/$path" ]] && EXISTING_PATHS+=("$path")
+done
+
+tar \
+    --acls \
+    --xattrs \
+    --numeric-owner \
+    --warning=no-file-changed \
+    --transform='s|^__generated__|generated|;s|^\(etc\|opt\|home\)/|rootfs/\1/|' \
+    -C / \
+    -czf - \
+    "${EXISTING_PATHS[@]}" \
+    -C "$WORK_DIR" __generated__

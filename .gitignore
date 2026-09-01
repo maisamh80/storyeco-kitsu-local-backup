@@ -1,0 +1,41 @@
+# Build and release outputs
+dist/
+release/
+.tools/
+*.zip
+*.sha256
+
+# Visual Studio / .NET
+.vs/
+bin/
+obj/
+*.user
+*.suo
+*.pdb
+
+# Local QA artifacts
+qa-*.png
+
+# Local configuration and secrets
+settings.json
+*.secret
+*.credentials
+*.private
+*.key
+*.pem
+*.pfx
+*.conf
+.env
+
+# Backup artifacts
+*.tar
+*.tar.gz
+*.part
+ServerBackup/
+ServerSnapshot/
+S3/
+
+# OS files
+Thumbs.db
+Desktop.ini
+.DS_Store
