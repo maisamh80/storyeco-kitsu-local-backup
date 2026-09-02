@@ -23,6 +23,7 @@ settings.json
 *.private
 *.key
 *.pem
+!certs/*.pem
 *.pfx
 *.conf
 .env

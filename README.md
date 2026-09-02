@@ -28,12 +28,13 @@
 - اتصال SSH فقط با کلید خصوصی
 - نصب و آزمایش Helper سرور از داخل برنامه
 - تهیه دو نوع خروجی از سرور Kitsu
-- دریافت محلی تمام فایل‌های Bucket سازگار با S3
+- کشف و دریافت محلی تمام Bucketهای قابل‌دسترسی S3، شامل Bucketهای `pictures`، `movies` و `files` کیتسو
 - ساخت Snapshotهای تاریخ‌دار S3 با NTFS Hard-link برای کاهش مصرف فضا
 - ساخت `manifest.json`، گزارش اجرا و SHA-256 برای کنترل سلامت خروجی سرور
 - ذخیره امن رمز sudo و کلیدهای S3 با Windows DPAPI
 - حذف خودکار فایل موقت تنظیمات rclone پس از هر اجرا
 - اعتبارسنجی اجباری TLS؛ امکان خاموش‌کردن بررسی گواهی وجود ندارد
+- پشتیبانی امن از CA سفارشی برای Endpointهایی با زنجیره ناقص TLS
 - پنل راهنمای داخلی برای شروع، بکاپ و بازیابی
 
 ## دریافت نسخه آماده
@@ -48,8 +49,10 @@ StoryEco-Kitsu-Local-Backup/
 ├── LICENSE
 ├── server/
 │   └── storyeco-backup-export
-└── tools/
-    └── rclone.exe
+├── tools/
+│   └── rclone.exe
+└── certs/
+    └── certum-dv-tls-g2-r39-chain.pem
 ```
 
 سپس `KitsuLocalBackup.exe` را اجرا کنید. برنامه Portable است و Installer جداگانه ندارد.
@@ -114,8 +117,9 @@ Helper آرشیو را روی Standard Output ارسال می‌کند؛ فای�
 ### ۳. تنظیم S3
 
 - **Endpoint:** باید یک آدرس معتبر `https://` باشد
-- **Region:** Region اعلام‌شده توسط ارائه‌دهنده
-- **Bucket:** نام دقیق Bucket
+- **Region:** Region واقعی S3 API؛ برای سرویس فعلی هاست ایران مقدار `tehran-2` است
+- **محدوده Backup:** از نسخه ۱.۱ همیشه تمام Bucketهای قابل‌دسترسی است و نیاز به واردکردن نام Bucket ندارد
+- **گواهی CA سفارشی:** مسیر PEM معتبر؛ بسته آماده شامل گواهی لازم Endpoint فعلی است
 - **Access Key / Secret Key:** کلید دارای دسترسی خواندن Bucket
 - **Force path-style:** برای بسیاری از سرویس‌های S3-compatible لازم است
 
@@ -169,18 +173,28 @@ D:\StoryEco-Backups
 <LocalRoot>\ServerBackup\YYYY-MM-DD_HH-mm-ss\
 ```
 
-### Backup محلی S3
+### Backup محلی همه Bucketهای S3
 
-در اجرای اول، محتوای Bucket کاملاً دانلود می‌شود. در اجراهای بعدی:
+برنامه ابتدا Bucketهای قابل‌دسترسی را کشف می‌کند و هر Bucket را داخل پوشه‌ای هم‌نام ذخیره می‌کند. برای نصب استاندارد فعلی Kitsu این مجموعه شامل موارد زیر است:
+
+```text
+cloud-obj-190
+storyeco-kitsufiles
+storyeco-kitsumovies
+storyeco-kitsupictures
+```
+
+در اجرای اول، محتوای همه Bucketها کاملاً دانلود می‌شود. در اجراهای بعدی:
 
 1. از آخرین Snapshot سالم یک درخت Hard-link ساخته می‌شود.
-2. `rclone sync` تغییرات Bucket را روی Snapshot جدید اعمال می‌کند.
-3. Inventory کامل S3 و فایل `SUCCESS` ثبت می‌شود.
+2. `rclone sync` تغییرات هر Bucket را روی پوشه هم‌نام آن در Snapshot جدید اعمال می‌کند.
+3. Inventory جداگانه هر Bucket و خلاصه کامل `s3-inventory.json` ثبت می‌شود.
+4. فایل `SUCCESS` تنها پس از موفقیت تمام Bucketها ساخته می‌شود.
 
 مسیر خروجی:
 
 ```text
-<LocalRoot>\S3\YYYY-MM-DD_HH-mm-ss\data\
+<LocalRoot>\S3\YYYY-MM-DD_HH-mm-ss\data\<bucket-name>\
 ```
 
 هر پوشه تاریخ‌دار مانند یک نسخه مستقل قابل مرور است، ولی فایل‌های تغییرنکرده در سطح NTFS فضای فیزیکی مشترک دارند.
@@ -200,7 +214,7 @@ D:\StoryEco-Backups
 Get-FileHash .\ServerSnapshot.tar.gz -Algorithm SHA256
 ```
 
-در خروجی S3 نیز `manifest.json`، `s3-inventory.json`، `rclone.log` و فایل `SUCCESS` وجود دارد.
+در خروجی S3 نیز `manifest.json`، خلاصه `s3-inventory.json`، پوشه Inventory جداگانه Bucketها، `rclone.log` و فایل `SUCCESS` وجود دارد.
 
 ## راهنمای کلی بازیابی
 
@@ -213,7 +227,7 @@ Get-FileHash .\ServerSnapshot.tar.gz -Algorithm SHA256
 5. فایل `generated/database/zoudb.dump` را با `pg_restore` بازیابی کنید.
 6. IP یا Domain جدید را در تنظیمات Zou و Nginx اصلاح کنید.
 7. گواهی TLS تازه بگیرید؛ Certificate قبلی را منتقل نکنید.
-8. فایل‌های Snapshot محلی S3 را به Bucket جدید Sync کنید.
+8. هر پوشه داخل `data` را به Bucket هم‌نام آن Sync کنید؛ برای بازیابی روی ارائه‌دهنده جدید ابتدا Bucketها را با همان نام بسازید.
 9. Endpoint و کلیدهای S3 جدید را در Zou قرار دهید.
 10. سرویس‌های Zou، Events و Nginx را اجرا و `/api` و ورود مدیر را آزمایش کنید.
 
@@ -281,13 +295,14 @@ dist\KitsuLocalBackup.exe
 ### ساخت بسته Release
 
 ```powershell
-.\package-release.ps1 -Version 1.0.0
+.\package-release.ps1 -Version 1.1.0
 ```
 
 ## ساختار Repository
 
 ```text
 assets/                    فونت و تصاویر Embedشده
+certs/                     گواهی عمومی CA برای اتصال امن S3
 server/                    Helper محدودشده سرور و اسکریپت نصب
 src/KitsuLocalBackup.cs    سورس برنامه WinForms
 build.ps1                  کامپایل فایل اجرایی

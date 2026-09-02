@@ -25,6 +25,15 @@ Kitsu is developed by CGWire and is licensed separately under AGPL-3.0. This rep
 
 This project is an independent StoryEco utility and is not an official CGWire product or endorsement.
 
+## Certum public CA certificate
+
+Release bundles include the public `Certum DV TLS G2 R39 CA` intermediate certificate solely to complete TLS verification for compatible S3 endpoints that omit it from their served chain.
+
+- Issuer: Certum Trusted Root CA
+- Valid until: 2039-06-05
+- SHA-256 fingerprint: `83:C0:A5:A7:68:44:C8:40:DF:AF:82:0F:FD:02:AD:F6:57:3A:26:82:3E:F6:AF:75:8A:33:84:A0:AC:04:40:83`
+- Repository: http://certumdvtlsg2r39ca.repository.certum.pl/certumdvtlsg2r39ca.cer
+
 ## StoryEco
 
 The StoryEco name and logo are provided by StoryEco and are not granted for unrelated branding use by the MIT license covering the application source code.

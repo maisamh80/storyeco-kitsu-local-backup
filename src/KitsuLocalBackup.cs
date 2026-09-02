@@ -19,9 +19,9 @@ using System.Windows.Forms;
 [assembly: AssemblyProduct("StoryEco | Kitsu Local Backup")]
 [assembly: AssemblyCompany("StoryEco")]
 [assembly: AssemblyCopyright("Copyright © 2026 StoryEco")]
-[assembly: AssemblyVersion("1.0.0.0")]
-[assembly: AssemblyFileVersion("1.0.0.0")]
-[assembly: AssemblyInformationalVersion("1.0.0")]
+[assembly: AssemblyVersion("1.1.0.0")]
+[assembly: AssemblyFileVersion("1.1.0.0")]
+[assembly: AssemblyInformationalVersion("1.1.0")]
 
 namespace StoryEco.KitsuBackup
 {
@@ -77,6 +77,12 @@ namespace StoryEco.KitsuBackup
                         if (stream == null || stream.Length == 0) return 13;
                 }
 
+                string certificatePath = AppSettings.DefaultS3CaCertificatePath;
+                if (!File.Exists(certificatePath)) return 14;
+                string certificateText = File.ReadAllText(certificatePath);
+                if (!certificateText.Contains("-----BEGIN CERTIFICATE-----") ||
+                    !certificateText.Contains("-----END CERTIFICATE-----")) return 15;
+
                 success = true;
                 return 0;
             }
@@ -107,7 +113,10 @@ namespace StoryEco.KitsuBackup
 
         [DataMember] public string S3Endpoint = "";
         [DataMember] public string S3Region = "";
-        [DataMember] public string S3Bucket = "";
+        // Retained for settings-file compatibility. Version 1.1+ always discovers
+        // and backs up every bucket visible to the configured credentials.
+        [DataMember] public string S3Bucket = "*";
+        [DataMember] public string S3CaCertificatePath = DefaultS3CaCertificatePath;
         [DataMember] public string ProtectedS3AccessKey = "";
         [DataMember] public string ProtectedS3SecretKey = "";
         [DataMember] public bool S3ForcePathStyle = true;
@@ -117,6 +126,32 @@ namespace StoryEco.KitsuBackup
             "Kitsu Backups");
         [DataMember] public string RclonePath = Path.Combine(
             AppDomain.CurrentDomain.BaseDirectory, "tools", "rclone.exe");
+
+        public static string DefaultS3CaCertificatePath
+        {
+            get
+            {
+                return Path.Combine(AppDomain.CurrentDomain.BaseDirectory,
+                    "certs", "certum-dv-tls-g2-r39-chain.pem");
+            }
+        }
+
+        public void Normalize()
+        {
+            S3Bucket = "*";
+            if (String.Equals((S3Endpoint ?? "").TrimEnd('/'),
+                "https://tehran-2a.irans3.com", StringComparison.OrdinalIgnoreCase) &&
+                (String.IsNullOrWhiteSpace(S3Region) ||
+                 String.Equals(S3Region, "default", StringComparison.OrdinalIgnoreCase) ||
+                 String.Equals(S3Region, "tehran-2a", StringComparison.OrdinalIgnoreCase)))
+                S3Region = "tehran-2";
+            if (String.IsNullOrWhiteSpace(S3CaCertificatePath) &&
+                File.Exists(DefaultS3CaCertificatePath))
+                S3CaCertificatePath = DefaultS3CaCertificatePath;
+            if ((String.IsNullOrWhiteSpace(RclonePath) || !File.Exists(RclonePath)) &&
+                File.Exists(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "tools", "rclone.exe")))
+                RclonePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "tools", "rclone.exe");
+        }
 
         public string SudoPassword
         {
@@ -187,7 +222,9 @@ namespace StoryEco.KitsuBackup
                 using (FileStream stream = File.OpenRead(FilePath))
                 {
                     var serializer = new DataContractJsonSerializer(typeof(AppSettings));
-                    return (AppSettings)serializer.ReadObject(stream);
+                    AppSettings settings = (AppSettings)serializer.ReadObject(stream);
+                    settings.Normalize();
+                    return settings;
                 }
             }
             catch
@@ -626,7 +663,7 @@ namespace StoryEco.KitsuBackup
         private TextBox _sudoPassword;
         private TextBox _s3Endpoint;
         private TextBox _s3Region;
-        private TextBox _s3Bucket;
+        private TextBox _s3CaCertificate;
         private TextBox _s3Access;
         private TextBox _s3Secret;
         private CheckBox _s3PathStyle;
@@ -907,10 +944,14 @@ namespace StoryEco.KitsuBackup
             table.GetControlFromPosition(2, row - 1).Click += delegate { BrowseFile(_sshKey, "All files|*.*"); };
             _sudoPassword = AddTextRow(table, ref row, "رمز sudo", null, true);
 
-            AddSection(table, ref row, "ذخیره‌ساز S3");
+            AddSection(table, ref row, "ذخیره‌ساز S3 — همه Bucketها");
             _s3Endpoint = AddTextRow(table, ref row, "Endpoint", null, false);
             _s3Region = AddTextRow(table, ref row, "Region", null, false);
-            _s3Bucket = AddTextRow(table, ref row, "Bucket", null, false);
+            _s3CaCertificate = AddTextRow(table, ref row, "گواهی CA سفارشی", "انتخاب", false);
+            table.GetControlFromPosition(2, row - 1).Click += delegate
+            {
+                BrowseFile(_s3CaCertificate, "PEM certificate|*.pem;*.crt;*.cer|All files|*.*");
+            };
             _s3Access = AddTextRow(table, ref row, "Access Key", null, true);
             _s3Secret = AddTextRow(table, ref row, "Secret Key", null, true);
             _s3PathStyle = new CheckBox();
@@ -991,7 +1032,7 @@ namespace StoryEco.KitsuBackup
             var note = new Label();
             note.Dock = DockStyle.Fill;
             note.TextAlign = ContentAlignment.MiddleLeft;
-            note.Text = "رمز sudo و کلیدهای S3 با Windows DPAPI ذخیره می‌شوند. فایل‌های بکاپ سرور رمزنگاری نمی‌شوند؛ مسیر محلی را با BitLocker محافظت کنید. اعتبارسنجی TLS در S3 هیچ‌وقت غیرفعال نمی‌شود.";
+            note.Text = "رمز sudo و کلیدهای S3 با Windows DPAPI ذخیره می‌شوند. همه Bucketهای قابل‌دسترسی جداگانه بکاپ گرفته می‌شوند. فایل‌های بکاپ سرور رمزنگاری نمی‌شوند؛ مسیر محلی را با BitLocker محافظت کنید. اعتبارسنجی TLS در S3 هیچ‌وقت غیرفعال نمی‌شود.";
             note.ForeColor = UiTheme.Muted;
             note.Tag = "muted";
             note.RightToLeft = RightToLeft.Yes;
@@ -1054,10 +1095,10 @@ namespace StoryEco.KitsuBackup
                 "این گزینه برای بکاپ‌های منظم و سریع‌تر است و اطلاعات اصلی Kitsu، دیتابیس و تنظیمات موردنیاز را دریافت می‌کند. پیشنهاد: هفته‌ای یک‌بار یا بعد از ورود اطلاعات مهم آن را اجرا کنید. تا پایان عملیات، برنامه و اینترنت را باز نگه دارید.", 132);
 
             AddGuideCard(table, ref row, "۴. Backup محلی S3",
-                "این گزینه همه عکس‌ها و ویدیوهای موجود در Bucket را روی کامپیوتر کپی می‌کند. اجرای اول ممکن است طولانی باشد؛ اجراهای بعدی فقط تغییرات را دریافت می‌کنند و برای فایل‌های تکراری از Hard-link استفاده می‌شود. اگر تست S3 خطای TLS داد، بکاپ را اجرا نکنید و ابتدا مشکل گواهی سرویس‌دهنده را برطرف کنید.", 148);
+                "این گزینه همه Bucketهای قابل‌دسترسی را شناسایی می‌کند و هرکدام را با نام اصلی در پوشه‌ای جدا روی کامپیوتر کپی می‌کند؛ بنابراین Bucketهای pictures، movies و files کیتسو همگی محفوظ می‌مانند. اجرای اول ممکن است طولانی باشد و اجراهای بعدی برای فایل‌های تکراری از Hard-link استفاده می‌کنند. اگر تست S3 خطای TLS داد، مسیر گواهی CA سفارشی را بررسی کنید.", 166);
 
             AddGuideCard(table, ref row, "۵. بازیابی پس از ازبین‌رفتن سرورها",
-                "روی سرور جدید Ubuntu 24.04 نصب کنید، سپس فایل Snapshot را باز کرده و تنظیمات و دیتابیس را مطابق پوشه‌های داخل آرشیو برگردانید. فایل‌های بکاپ S3 را نیز به Bucket جدید منتقل کنید و Endpoint و کلیدهای جدید را در Kitsu ثبت کنید. فایل manifest.json و فایل SHA256 کنار هر بکاپ برای بررسی سالم‌بودن آن هستند.", 148);
+                "روی سرور جدید Ubuntu 24.04 نصب کنید، سپس فایل Snapshot را باز کرده و تنظیمات و دیتابیس را مطابق پوشه‌های داخل آرشیو برگردانید. هر پوشه داخل data بکاپ S3 را به Bucket هم‌نام خودش منتقل کنید و Endpoint، Region و کلیدهای جدید را در Kitsu ثبت کنید. فایل manifest.json و فایل SHA256 کنار هر بکاپ برای بررسی سالم‌بودن آن هستند.", 166);
 
             AddGuideCard(table, ref row, "۶. برنامه نگهداری پیشنهادی",
                 "Backup سرور: هفتگی  |  Snapshot کامل: ماهانه و قبل از تغییرات مهم  |  Backup S3: هفتگی یا بعد از آپلودهای سنگین. حداقل دو کپی جدا نگه دارید: یکی روی کامپیوتر و یکی روی هارد اکسترنال. هرگز آخرین نسخه سالم را قبل از آزمایش نسخه جدید حذف نکنید.", 132);
@@ -1251,7 +1292,7 @@ namespace StoryEco.KitsuBackup
             _sudoPassword.Text = _settings.SudoPassword;
             _s3Endpoint.Text = _settings.S3Endpoint;
             _s3Region.Text = _settings.S3Region;
-            _s3Bucket.Text = _settings.S3Bucket;
+            _s3CaCertificate.Text = _settings.S3CaCertificatePath;
             _s3Access.Text = _settings.S3AccessKey;
             _s3Secret.Text = _settings.S3SecretKey;
             _s3PathStyle.Checked = _settings.S3ForcePathStyle;
@@ -1268,7 +1309,8 @@ namespace StoryEco.KitsuBackup
             _settings.SudoPassword = _sudoPassword.Text;
             _settings.S3Endpoint = _s3Endpoint.Text.Trim().TrimEnd('/');
             _settings.S3Region = _s3Region.Text.Trim();
-            _settings.S3Bucket = _s3Bucket.Text.Trim();
+            _settings.S3Bucket = "*";
+            _settings.S3CaCertificatePath = _s3CaCertificate.Text.Trim();
             _settings.S3AccessKey = _s3Access.Text.Trim();
             _settings.S3SecretKey = _s3Secret.Text;
             _settings.S3ForcePathStyle = _s3PathStyle.Checked;
@@ -1470,9 +1512,16 @@ namespace StoryEco.KitsuBackup
                 string config = CreateTemporaryRcloneConfig(settings);
                 try
                 {
-                    return RunProcessText(settings.RclonePath,
-                        "lsd " + Quote("source:" + settings.S3Bucket) +
-                        " --config " + Quote(config) + " --max-depth 1", log, null);
+                    List<string> buckets = DiscoverS3Buckets(settings, config, log);
+                    foreach (string bucket in buckets)
+                    {
+                        RunProcessText(settings.RclonePath,
+                            "lsd " + Quote("source:" + bucket) +
+                            " --max-depth 1 --config " + Quote(config) +
+                            GetRcloneTlsArguments(settings), log, null);
+                    }
+                    return "Secure S3 connection succeeded. Accessible buckets (" +
+                        buckets.Count + "): " + String.Join(", ", buckets);
                 }
                 finally { TryDelete(config); }
             });
@@ -1504,23 +1553,51 @@ namespace StoryEco.KitsuBackup
             string config = CreateTemporaryRcloneConfig(settings);
             try
             {
-                log("Synchronizing S3 into the new dated snapshot...");
-                string arguments = "sync " + Quote("source:" + settings.S3Bucket) + " " + Quote(dataDirectory) +
-                    " --config " + Quote(config) +
-                    " --fast-list --transfers 4 --checkers 8 --stats 15s --stats-one-line" +
-                    " --log-level INFO --log-file " + Quote(logPath);
-                RunProcessText(settings.RclonePath, arguments, log, logPath);
+                List<string> buckets = DiscoverS3Buckets(settings, config, log);
+                RemoveStaleBucketDirectories(dataDirectory, buckets, log);
+
+                string inventoryDirectory = Path.Combine(runDirectory, "s3-inventory");
+                Directory.CreateDirectory(inventoryDirectory);
+                var inventory = new S3Inventory();
+                inventory.FormatVersion = 2;
+                inventory.CreatedAt = DateTimeOffset.Now.ToString("O");
+                inventory.Endpoint = settings.S3Endpoint;
+                inventory.Region = settings.S3Region;
+
+                foreach (string bucket in buckets)
+                {
+                    log("Synchronizing S3 bucket: " + bucket);
+                    string bucketDirectory = Path.Combine(dataDirectory, bucket);
+                    Directory.CreateDirectory(bucketDirectory);
+                    string arguments = "sync " + Quote("source:" + bucket) + " " + Quote(bucketDirectory) +
+                        " --config " + Quote(config) + GetRcloneTlsArguments(settings) +
+                        " --fast-list --transfers 4 --checkers 8 --stats 15s --stats-one-line" +
+                        " --log-level INFO --log-file " + Quote(logPath);
+                    RunProcessText(settings.RclonePath, arguments, log, logPath);
+
+                    string bucketInventoryPath = Path.Combine(inventoryDirectory, bucket + ".json");
+                    RunProcessToFile(settings.RclonePath,
+                        "lsjson " + Quote("source:" + bucket) +
+                        " --recursive --hash --config " + Quote(config) +
+                        GetRcloneTlsArguments(settings), bucketInventoryPath, log);
+
+                    long bucketBytes;
+                    long bucketFiles;
+                    GetDirectoryStats(bucketDirectory, out bucketFiles, out bucketBytes);
+                    inventory.Buckets.Add(new S3BucketInventory
+                    {
+                        Name = bucket,
+                        FileCount = bucketFiles,
+                        TotalBytes = bucketBytes,
+                        InventoryFile = "s3-inventory/" + bucket + ".json"
+                    });
+                }
 
                 string inventoryPath = Path.Combine(runDirectory, "s3-inventory.json");
-                RunProcessToFile(settings.RclonePath,
-                    "lsjson " + Quote("source:" + settings.S3Bucket) +
-                    " --recursive --hash --config " + Quote(config),
-                    inventoryPath, log);
-
-                long totalBytes;
-                long fileCount;
-                GetDirectoryStats(dataDirectory, out fileCount, out totalBytes);
-                string extra = "files=" + fileCount + ";bytes=" + totalBytes;
+                WriteS3Inventory(inventoryPath, inventory);
+                long fileCount = inventory.Buckets.Sum(item => item.FileCount);
+                long totalBytes = inventory.Buckets.Sum(item => item.TotalBytes);
+                string extra = "buckets=" + inventory.Buckets.Count + ";files=" + fileCount + ";bytes=" + totalBytes;
                 WriteManifest(runDirectory, "S3", "success", settings.S3Endpoint,
                     dataDirectory, null, extra);
                 File.WriteAllText(Path.Combine(runDirectory, "SUCCESS"), DateTimeOffset.Now.ToString("O"));
@@ -1549,9 +1626,65 @@ namespace StoryEco.KitsuBackup
             if (!File.Exists(settings.RclonePath)) throw new FileNotFoundException("rclone.exe was not found.", settings.RclonePath);
             if (!Uri.IsWellFormedUriString(settings.S3Endpoint, UriKind.Absolute) || !settings.S3Endpoint.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("S3 endpoint must be a valid HTTPS URL.");
-            if (String.IsNullOrWhiteSpace(settings.S3Bucket)) throw new InvalidOperationException("S3 bucket is empty.");
             if (String.IsNullOrWhiteSpace(settings.S3AccessKey) || String.IsNullOrWhiteSpace(settings.S3SecretKey))
                 throw new InvalidOperationException("S3 credentials are incomplete.");
+            if (!String.IsNullOrWhiteSpace(settings.S3CaCertificatePath) && !File.Exists(settings.S3CaCertificatePath))
+                throw new FileNotFoundException("S3 CA certificate was not found.", settings.S3CaCertificatePath);
+        }
+
+        private static List<string> DiscoverS3Buckets(AppSettings settings, string config, Action<string> log)
+        {
+            string output = RunProcessText(settings.RclonePath,
+                "lsf " + Quote("source:") +
+                " --dirs-only --format p --max-depth 1 --config " + Quote(config) +
+                GetRcloneTlsArguments(settings), log, null);
+            List<string> buckets = output
+                .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(value => value.Trim().TrimEnd('/'))
+                .Where(value => value.Length > 0)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (buckets.Count == 0)
+                throw new InvalidOperationException("No accessible S3 buckets were found.");
+            foreach (string bucket in buckets) ValidateBucketName(bucket);
+            return buckets;
+        }
+
+        private static void ValidateBucketName(string bucket)
+        {
+            if (bucket == "." || bucket == ".." || bucket.IndexOfAny(new[] { '/', '\\', ':', '\0' }) >= 0)
+                throw new InvalidOperationException("S3 returned an unsafe bucket name: " + bucket);
+        }
+
+        private static string GetRcloneTlsArguments(AppSettings settings)
+        {
+            if (String.IsNullOrWhiteSpace(settings.S3CaCertificatePath)) return "";
+            return " --ca-cert " + Quote(settings.S3CaCertificatePath);
+        }
+
+        private static void RemoveStaleBucketDirectories(string dataDirectory,
+            IEnumerable<string> visibleBuckets, Action<string> log)
+        {
+            var visible = new HashSet<string>(visibleBuckets, StringComparer.OrdinalIgnoreCase);
+            foreach (string directory in Directory.GetDirectories(dataDirectory))
+            {
+                string name = Path.GetFileName(directory);
+                if (!visible.Contains(name))
+                {
+                    log("Removing bucket missing from current S3 snapshot: " + name);
+                    Directory.Delete(directory, true);
+                }
+            }
+        }
+
+        private static void WriteS3Inventory(string path, S3Inventory inventory)
+        {
+            using (FileStream stream = File.Create(path))
+            {
+                var serializer = new DataContractJsonSerializer(typeof(S3Inventory));
+                serializer.WriteObject(stream, inventory);
+            }
         }
 
         private static string RunSshText(AppSettings settings, string command, Action<string> log)
@@ -1742,6 +1875,30 @@ namespace StoryEco.KitsuBackup
         [DataMember] public string Artifact;
         [DataMember] public string Sha256;
         [DataMember] public string Details;
+    }
+
+    [DataContract]
+    internal sealed class S3Inventory
+    {
+        public S3Inventory()
+        {
+            Buckets = new List<S3BucketInventory>();
+        }
+
+        [DataMember] public int FormatVersion;
+        [DataMember] public string CreatedAt;
+        [DataMember] public string Endpoint;
+        [DataMember] public string Region;
+        [DataMember] public List<S3BucketInventory> Buckets;
+    }
+
+    [DataContract]
+    internal sealed class S3BucketInventory
+    {
+        [DataMember] public string Name;
+        [DataMember] public long FileCount;
+        [DataMember] public long TotalBytes;
+        [DataMember] public string InventoryFile;
     }
 
     internal static class PortableArchive
