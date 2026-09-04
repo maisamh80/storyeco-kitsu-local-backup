@@ -27,7 +27,7 @@ This project is an independent StoryEco utility and is not an official CGWire pr
 
 ## Certum public CA certificate
 
-Release bundles include the public `Certum DV TLS G2 R39 CA` intermediate certificate solely to complete TLS verification for compatible S3 endpoints that omit it from their served chain.
+The source repository retains the historical public `Certum DV TLS G2 R39 CA` intermediate certificate (not distributed or enabled in v1.1.1+) formerly used to complete TLS verification for compatible S3 endpoints that omit it from their served chain.
 
 - Issuer: Certum Trusted Root CA
 - Valid until: 2039-06-05

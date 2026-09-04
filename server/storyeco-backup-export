@@ -62,6 +62,17 @@ findmnt > "$GENERATED/inventory/mounts.txt" 2>&1 || true
 free -h > "$GENERATED/inventory/memory.txt" 2>&1 || true
 df -hT > "$GENERATED/inventory/disk-usage.txt" 2>&1 || true
 
+# Required recovery metadata: fail rather than silently produce an incomplete bundle.
+/opt/zou/zouenv/bin/python -m pip freeze > "$GENERATED/inventory/zou-requirements.txt"
+/opt/zou/zouenv/bin/python --version > "$GENERATED/inventory/python-version.txt"
+FRONTEND_TARGET="$(readlink -f /opt/kitsu/web/current)"
+case "$FRONTEND_TARGET" in
+    /opt/kitsu/web/releases/*) ;;
+    *) echo "Unexpected frontend target; refusing incomplete backup" >&2; exit 65 ;;
+esac
+test -f "$FRONTEND_TARGET/index.html"
+printf '%s\n' "$FRONTEND_TARGET" > "$GENERATED/inventory/frontend-target.txt"
+
 cat > "$GENERATED/RESTORE-NOTES.txt" <<'EOF'
 This is a portable StoryEco/Kitsu recovery bundle, not a hypervisor disk image.
 
@@ -100,6 +111,9 @@ ROOT_PATHS=(
     opt/kitsu/web/current
     opt/zou/previews
     opt/zou/plugins
+    "${FRONTEND_TARGET#/}"
+    etc/letsencrypt/renewal-hooks/deploy
+    usr/local/sbin/storyeco-backup-export
 )
 
 # Preserve public login keys for every regular local user, never private keys.
@@ -136,7 +150,7 @@ tar \
     --xattrs \
     --numeric-owner \
     --warning=no-file-changed \
-    --transform='s|^__generated__|generated|;s|^\(etc\|opt\|home\)/|rootfs/\1/|' \
+    --transform='flags=r;s|^__generated__|generated|;s|^\(etc\|opt\|home\|usr\)/|rootfs/\1/|' \
     -C / \
     -czf - \
     "${EXISTING_PATHS[@]}" \

@@ -13,6 +13,7 @@ $distRoot = Join-Path $projectRoot 'dist'
 $releaseRoot = Join-Path $projectRoot 'release'
 $bundleName = "StoryEco-Kitsu-Local-Backup-v$Version"
 $bundleRoot = Join-Path $releaseRoot $bundleName
+if ([IO.Path]::GetFullPath($bundleRoot) -ne (Join-Path ([IO.Path]::GetFullPath($releaseRoot)) $bundleName)) { throw 'Unsafe bundle path' }
 $zipPath = Join-Path $releaseRoot "$bundleName-windows-x64.zip"
 $zipHashPath = "$zipPath.sha256"
 
@@ -20,7 +21,6 @@ $requiredFiles = @(
     (Join-Path $distRoot 'KitsuLocalBackup.exe'),
     (Join-Path $distRoot 'server\storyeco-backup-export'),
     (Join-Path $distRoot 'tools\rclone.exe'),
-    (Join-Path $distRoot 'certs\certum-dv-tls-g2-r39-chain.pem'),
     (Join-Path $projectRoot 'README.md'),
     (Join-Path $projectRoot 'LICENSE'),
     (Join-Path $projectRoot 'THIRD-PARTY-NOTICES.md'),
@@ -48,13 +48,11 @@ if (Test-Path -LiteralPath $zipHashPath) {
 New-Item -ItemType Directory -Force -Path $bundleRoot | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $bundleRoot 'server') | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $bundleRoot 'tools') | Out-Null
-New-Item -ItemType Directory -Force -Path (Join-Path $bundleRoot 'certs') | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $bundleRoot 'licenses') | Out-Null
 
 Copy-Item -LiteralPath (Join-Path $distRoot 'KitsuLocalBackup.exe') -Destination $bundleRoot
 Copy-Item -LiteralPath (Join-Path $distRoot 'server\storyeco-backup-export') -Destination (Join-Path $bundleRoot 'server')
 Copy-Item -LiteralPath (Join-Path $distRoot 'tools\rclone.exe') -Destination (Join-Path $bundleRoot 'tools')
-Copy-Item -LiteralPath (Join-Path $distRoot 'certs\certum-dv-tls-g2-r39-chain.pem') -Destination (Join-Path $bundleRoot 'certs')
 Copy-Item -LiteralPath (Join-Path $projectRoot 'README.md') -Destination $bundleRoot
 Copy-Item -LiteralPath (Join-Path $projectRoot 'LICENSE') -Destination $bundleRoot
 Copy-Item -LiteralPath (Join-Path $projectRoot 'THIRD-PARTY-NOTICES.md') -Destination $bundleRoot

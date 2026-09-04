@@ -6,7 +6,6 @@ $assetsDir = Join-Path $projectRoot 'assets'
 $fontPath = Join-Path $assetsDir 'Vazirmatn-VariableFont_wght.ttf'
 $kitsuLogoPath = Join-Path $assetsDir 'kitsu.png'
 $storyEcoLogoPath = Join-Path $assetsDir 'storyeco-dark.png'
-$certificatePath = Join-Path $projectRoot 'certs\certum-dv-tls-g2-r39-chain.pem'
 $outputDir = Join-Path $projectRoot 'dist'
 $outputPath = Join-Path $outputDir 'KitsuLocalBackup.exe'
 $compiler = 'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\MSBuild\Current\Bin\Roslyn\csc.exe'
@@ -19,7 +18,7 @@ if (-not (Test-Path -LiteralPath $compiler)) {
     throw 'C# compiler was not found.'
 }
 
-foreach ($asset in @($fontPath, $kitsuLogoPath, $storyEcoLogoPath, $certificatePath)) {
+foreach ($asset in @($fontPath, $kitsuLogoPath, $storyEcoLogoPath)) {
     if (-not (Test-Path -LiteralPath $asset)) {
         throw "Embedded asset was not found: $asset"
     }
@@ -27,11 +26,8 @@ foreach ($asset in @($fontPath, $kitsuLogoPath, $storyEcoLogoPath, $certificateP
 
 New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $outputDir 'server') | Out-Null
-New-Item -ItemType Directory -Force -Path (Join-Path $outputDir 'certs') | Out-Null
 Copy-Item -LiteralPath (Join-Path $projectRoot 'server\storyeco-backup-export') `
     -Destination (Join-Path $outputDir 'server\storyeco-backup-export') -Force
-Copy-Item -LiteralPath $certificatePath `
-    -Destination (Join-Path $outputDir 'certs\certum-dv-tls-g2-r39-chain.pem') -Force
 
 & $compiler `
     /nologo `

@@ -19,9 +19,9 @@ using System.Windows.Forms;
 [assembly: AssemblyProduct("StoryEco | Kitsu Local Backup")]
 [assembly: AssemblyCompany("StoryEco")]
 [assembly: AssemblyCopyright("Copyright © 2026 StoryEco")]
-[assembly: AssemblyVersion("1.1.0.0")]
-[assembly: AssemblyFileVersion("1.1.0.0")]
-[assembly: AssemblyInformationalVersion("1.1.0")]
+[assembly: AssemblyVersion("1.1.1.0")]
+[assembly: AssemblyFileVersion("1.1.1.0")]
+[assembly: AssemblyInformationalVersion("1.1.1")]
 
 namespace StoryEco.KitsuBackup
 {
@@ -77,11 +77,24 @@ namespace StoryEco.KitsuBackup
                         if (stream == null || stream.Length == 0) return 13;
                 }
 
-                string certificatePath = AppSettings.DefaultS3CaCertificatePath;
-                if (!File.Exists(certificatePath)) return 14;
-                string certificateText = File.ReadAllText(certificatePath);
-                if (!certificateText.Contains("-----BEGIN CERTIFICATE-----") ||
-                    !certificateText.Contains("-----END CERTIFICATE-----")) return 15;
+                var settings = new AppSettings();
+                settings.Normalize();
+                if (settings.S3CaCertificatePath != "") return 14;
+                settings = new AppSettings { S3Endpoint = "https://tehran-2a.irans3.com",
+                    S3CaCertificatePath = AppSettings.DefaultS3CaCertificatePath };
+                settings.Normalize();
+                if (settings.S3CaCertificatePath != "") return 15;
+                settings.S3CaCertificatePath = AppSettings.DefaultS3CaCertificatePath;
+                settings.Normalize();
+                if (settings.S3CaCertificatePath == "") return 16;
+                settings = new AppSettings { S3Endpoint = "https://example.org",
+                    S3CaCertificatePath = AppSettings.DefaultS3CaCertificatePath };
+                settings.Normalize();
+                if (settings.S3CaCertificatePath == "") return 17;
+                settings = new AppSettings { S3Endpoint = "https://tehran-2a.irans3.com",
+                    S3CaCertificatePath = "custom.pem" };
+                settings.Normalize();
+                if (settings.S3CaCertificatePath != "custom.pem") return 18;
 
                 success = true;
                 return 0;
@@ -116,7 +129,8 @@ namespace StoryEco.KitsuBackup
         // Retained for settings-file compatibility. Version 1.1+ always discovers
         // and backs up every bucket visible to the configured credentials.
         [DataMember] public string S3Bucket = "*";
-        [DataMember] public string S3CaCertificatePath = DefaultS3CaCertificatePath;
+        [DataMember] public string S3CaCertificatePath = "";
+        [DataMember] public int TlsSettingsVersion;
         [DataMember] public string ProtectedS3AccessKey = "";
         [DataMember] public string ProtectedS3SecretKey = "";
         [DataMember] public bool S3ForcePathStyle = true;
@@ -145,9 +159,15 @@ namespace StoryEco.KitsuBackup
                  String.Equals(S3Region, "default", StringComparison.OrdinalIgnoreCase) ||
                  String.Equals(S3Region, "tehran-2a", StringComparison.OrdinalIgnoreCase)))
                 S3Region = "tehran-2";
-            if (String.IsNullOrWhiteSpace(S3CaCertificatePath) &&
-                File.Exists(DefaultS3CaCertificatePath))
-                S3CaCertificatePath = DefaultS3CaCertificatePath;
+            // One-time migration of the legacy bundled workaround only.
+            // Explicit custom certificates and subsequent user choices are preserved.
+            if (TlsSettingsVersion < 1 &&
+                String.Equals((S3Endpoint ?? "").TrimEnd('/'),
+                    "https://tehran-2a.irans3.com", StringComparison.OrdinalIgnoreCase) &&
+                String.Equals(Path.GetFileName(S3CaCertificatePath ?? ""),
+                    "certum-dv-tls-g2-r39-chain.pem", StringComparison.OrdinalIgnoreCase))
+                S3CaCertificatePath = "";
+            TlsSettingsVersion = 1;
             if ((String.IsNullOrWhiteSpace(RclonePath) || !File.Exists(RclonePath)) &&
                 File.Exists(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "tools", "rclone.exe")))
                 RclonePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "tools", "rclone.exe");
@@ -1311,6 +1331,7 @@ namespace StoryEco.KitsuBackup
             _settings.S3Region = _s3Region.Text.Trim();
             _settings.S3Bucket = "*";
             _settings.S3CaCertificatePath = _s3CaCertificate.Text.Trim();
+            _settings.TlsSettingsVersion = 1;
             _settings.S3AccessKey = _s3Access.Text.Trim();
             _settings.S3SecretKey = _s3Secret.Text;
             _settings.S3ForcePathStyle = _s3PathStyle.Checked;
